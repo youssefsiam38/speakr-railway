@@ -19,6 +19,7 @@ provider you configure. Standard library only, so it runs on a bare python image
 """
 import json
 import os
+import socket
 import sys
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -144,9 +145,22 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.flush()
 
 
+class DualStackServer(ThreadingHTTPServer):
+    # Bind IPv6 with V6ONLY off so both Railway's IPv6 private network and a plain
+    # IPv4 docker bridge can reach the stub from a single socket.
+    address_family = socket.AF_INET6
+
+    def server_bind(self):
+        try:
+            self.socket.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, 0)
+        except (AttributeError, OSError):
+            pass
+        super().server_bind()
+
+
 def main():
-    server = ThreadingHTTPServer(("0.0.0.0", PORT), Handler)
-    _log(f"listening on :{PORT}")
+    server = DualStackServer(("::", PORT), Handler)
+    _log(f"listening on [::]:{PORT}")
     server.serve_forever()
 
 
