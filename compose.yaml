@@ -1,0 +1,57 @@
+# Local test topology. It mirrors the Railway service plus a stub provider:
+#   app  -> the Speakr self-hosted server (official image), SQLite + uploads on a /data volume, admin via env.
+#   mock -> a tiny stdlib OpenAI-compatible endpoint (tests/mock) so the transcribe/summarise
+#           pipeline runs end to end without spending a real API key. NOT part of the template;
+#           the published template points TRANSCRIPTION_BASE_URL / TEXT_MODEL_BASE_URL at a real provider.
+# The template runs the official image unmodified, configured through environment variables.
+name: speakr-railway-test
+
+networks:
+  default:
+    name: speakr-railway-test
+
+services:
+  mock:
+    image: python:3.11-slim
+    restart: unless-stopped
+    command: ["python", "/mock/mock_openai.py"]
+    environment:
+      MOCK_PORT: '8080'
+    volumes:
+      - ./tests/mock:/mock:ro
+
+  app:
+    # 'lite' image (~700MB, no PyTorch): all features work; Inquire Mode's semantic search
+    # falls back to text search. Pinned by digest.
+    image: learnedmachine/speakr:0.10.5-alpha-lite@sha256:a0f28aa2a562596447290c632e4c0c11fa2a7d3f751c9b759f7eee4316a50664
+    restart: unless-stopped
+    init: true
+    depends_on:
+      - mock
+    environment:
+      # Admin account created on first boot by the image entrypoint.
+      ADMIN_USERNAME: ${SPEAKR_TEST_USERNAME:-admin}
+      ADMIN_EMAIL: ${SPEAKR_TEST_EMAIL:-admin@example.com}
+      ADMIN_PASSWORD: ${SPEAKR_TEST_PASSWORD:-local-test-only-admin-password}
+      # example.com has no MX record; skip the deliverability DNS lookup so admin creation succeeds.
+      SKIP_EMAIL_DOMAIN_CHECK: 'true'
+      # Text/LLM provider (summaries, titles, chat) -> the mock.
+      TEXT_MODEL_BASE_URL: http://mock:8080/v1
+      TEXT_MODEL_API_KEY: local-test-only
+      TEXT_MODEL_NAME: gpt-4o-mini
+      # Transcription provider (OpenAI Whisper connector) -> the mock.
+      TRANSCRIPTION_BASE_URL: http://mock:8080/v1
+      TRANSCRIPTION_API_KEY: local-test-only
+      TRANSCRIPTION_MODEL: whisper-1
+      # Security posture: registration closed; the deploy is admin-only until the admin invites users.
+      ALLOW_REGISTRATION: 'false'
+      SECRET_KEY: local-test-only-secret-key
+      SESSION_COOKIE_SECURE: 'false'
+      LOG_LEVEL: INFO
+    ports:
+      - '127.0.0.1:${SPEAKR_TEST_PORT:-18899}:8899'
+    volumes:
+      - data:/data
+
+volumes:
+  data:
