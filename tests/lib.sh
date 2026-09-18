@@ -52,7 +52,10 @@ login() {
   [ -n "$csrf" ] || { echo "no csrf token on /login" >&2; return 1; }
   printf '%s' "$csrf" > "$TEST_TMP/csrf"
   # A successful login 302-redirects to "/"; a failed one re-renders /login as 200.
+  # The Referer matches the host so Flask-WTF's strict-referer CSRF check passes over HTTPS
+  # (a real browser sends this automatically; curl does not).
   code=$(curl -s -c "$jar" -b "$jar" -o /dev/null -w '%{http_code}' --max-time 30 -X POST "$APP_URL/login" \
+    -H "Referer: $APP_URL/login" \
     --data-urlencode "email=$SPEAKR_EMAIL" \
     --data-urlencode "password=$SPEAKR_PASSWORD" \
     --data-urlencode "csrf_token=$csrf")
@@ -65,6 +68,7 @@ login_code() {
   page=$(curl -s -c "$jar" --max-time 30 "$APP_URL/login")
   csrf=$(printf '%s' "$page" | _extract_csrf)
   curl -s -c "$jar" -b "$jar" -o /dev/null -w '%{http_code}' --max-time 30 -X POST "$APP_URL/login" \
+    -H "Referer: $APP_URL/login" \
     --data-urlencode "email=$email" --data-urlencode "password=$password" --data-urlencode "csrf_token=$csrf"
 }
 
@@ -73,7 +77,7 @@ mint_token() {
   local jar=$1 name=${2:-speakr-tests} csrf resp
   csrf=$(cat "$TEST_TMP/csrf" 2>/dev/null)
   resp=$(curl -s -b "$jar" --max-time 30 -X POST "$APP_URL/api/tokens" \
-    -H 'Content-Type: application/json' -H "X-CSRFToken: $csrf" \
+    -H 'Content-Type: application/json' -H "X-CSRFToken: $csrf" -H "Referer: $APP_URL/" \
     --data "$(jq -nc --arg n "$name" '{name:$n}')")
   jq -r '.token // empty' <<<"$resp"
 }
